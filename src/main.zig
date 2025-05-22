@@ -16,7 +16,7 @@ pub fn handleSigWinch(_: c_int) callconv(.C) void {
 pub fn render(stdout: anytype, textBuffer: TextBuffer) !void {
     _ = try posix.write(terminal.tty, "\x1B[2J");
     //_ = text;
-    for (textBuffer.text, 0..) |line, i| {
+    for (textBuffer.text.items, 0..) |line, i| {
         moveCursor(stdout, i, 0);
         _ = try posix.write(terminal.tty, &line);
     }
@@ -76,16 +76,14 @@ pub fn main() !void {
     //while (try read_stream.readUntilDelimiterOrEofAlloc
 
     buffer.name = &fileName;
+    buffer.text = std.ArrayList([80]u8).init(allocator);
 
     //try read_stream.readUntilDelimiter(&text, '\n');
-    while (try read_stream.readUntilDelimiterOrEof(&buffer.text[buffer.lineCount], '\n')) |line| {
-        // Making sure the file doesn't read too much
-        if (buffer.lineCount + 1 >= buffer.text.len) {
-            break;
-        }
-
+    _ = try buffer.text.addOne();
+    while (try read_stream.readUntilDelimiterOrEof(&buffer.text.items[buffer.lineCount], '\n')) |line| {
         buffer.lineCount += 1;
         _ = line;
+        _ = try buffer.text.addOne();
     }
 
     //var file = std.fs.cwd().openFile("foo.txt", .{});
@@ -116,7 +114,8 @@ const Mode = enum {
 var mode: Mode = .normal;
 
 const TextBuffer = struct {
-    text: [4][80]u8 = undefined,
+    text: std.ArrayList([80]u8) = undefined,
+
     lineCount: usize = 0,
     name: *const []u8 = undefined,
 };
