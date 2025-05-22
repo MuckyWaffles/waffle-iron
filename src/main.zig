@@ -23,6 +23,14 @@ pub fn render(stdout: anytype, textBuffer: TextBuffer) !void {
 
     moveCursor(stdout, terminal.size.height, 0);
     _ = try posix.write(terminal.tty, textBuffer.name.*);
+
+    moveCursor(stdout, terminal.size.height, textBuffer.name.*.len + 2);
+
+    const modeString = switch (mode) {
+        .normal => "Mode: Normal",
+        .insert => "Mode: Insert",
+    };
+    _ = try posix.write(terminal.tty, modeString);
 }
 
 var terminal: term.Terminal = undefined;
@@ -39,6 +47,7 @@ pub fn main() !void {
         std.debug.print("Waffle Iron: requires an argument\n", .{});
         return;
     }
+
     const fileName = try allocator.alloc(u8, args[1].len);
     defer allocator.free(fileName);
     @memcpy(fileName, args[1]);
@@ -99,6 +108,13 @@ pub fn main() !void {
     while (!closeRequested) try mainLoop(stdout);
 }
 
+const Mode = enum {
+    normal,
+    insert,
+};
+
+var mode: Mode = .normal;
+
 const TextBuffer = struct {
     text: [4][80]u8 = undefined,
     lineCount: usize = 0,
@@ -132,7 +148,8 @@ fn mainLoop(stdout: anytype) !void {
         try posix.tcsetattr(terminal.tty, .NOW, terminal.raw);
 
         if (esc_read == 0) {
-            // Put something here?
+            // User just pressed the escape key
+            mode = .normal;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[A")) {
             if (cursorY > 0) cursorY -= 1;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[B")) {
@@ -148,23 +165,28 @@ fn mainLoop(stdout: anytype) !void {
     }
 
     // hjkl to navigate
-    switch (input[0]) {
-        'j' => {
-            if (cursorY < buffer.lineCount) cursorY += 1;
-        },
-        'k' => {
-            if (cursorY > 0) cursorY -= 1;
-        },
-        'h' => {
-            if (cursorX > 0) cursorX -= 1;
-        },
-        'l' => {
-            if (cursorX < 20) cursorX += 1;
-        },
-        'q' => {
-            closeRequested = true;
-        },
-        else => {},
+    if (mode == .normal) {
+        switch (input[0]) {
+            'i' => {
+                mode = .insert;
+            },
+            'j' => {
+                if (cursorY < buffer.lineCount) cursorY += 1;
+            },
+            'k' => {
+                if (cursorY > 0) cursorY -= 1;
+            },
+            'h' => {
+                if (cursorX > 0) cursorX -= 1;
+            },
+            'l' => {
+                if (cursorX < 20) cursorX += 1;
+            },
+            'q' => {
+                closeRequested = true;
+            },
+            else => {},
+        }
     }
     if (input[0] == '\n' or input[0] == '\r') {
         // hello?
