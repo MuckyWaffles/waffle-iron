@@ -153,14 +153,17 @@ pub fn main() !void {
     var file_reader = std.io.bufferedReader(file.reader());
     var read_stream = file_reader.reader();
 
-    var lineCount: usize = 0;
+    //while (try read_stream.readUntilDelimiterOrEofAlloc
+
     var text: [4][80]u8 = undefined;
     //try read_stream.readUntilDelimiter(&text, '\n');
-    while (try read_stream.readUntilDelimiterOrEof(&text[lineCount], '\n')) |line| {
-        lineCount += 1;
-        if (lineCount > text.len) {
+    while (try read_stream.readUntilDelimiterOrEof(&text[buffer.lineCount], '\n')) |line| {
+        // Making sure the file doesn't read too much
+        if (buffer.lineCount + 1 >= text.len) {
             break;
         }
+
+        buffer.lineCount += 1;
         _ = line;
     }
 
@@ -183,6 +186,11 @@ pub fn main() !void {
     // Main loop
     while (!closeRequested) try mainLoop(stdout, &text);
 }
+
+const TextBuffer = struct {
+    lineCount: usize = 0,
+};
+var buffer = TextBuffer{};
 
 var cursorX: u16 = 0;
 var cursorY: u16 = 0;
@@ -214,7 +222,7 @@ fn mainLoop(stdout: anytype, text: *[4][80]u8) !void {
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[A")) {
             if (cursorY > 0) cursorY -= 1;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[B")) {
-            if (cursorY < 10) cursorY += 1;
+            if (cursorY < buffer.lineCount) cursorY += 1;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[C")) {
             if (cursorX < 20) cursorX += 1;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[D")) {
@@ -228,7 +236,7 @@ fn mainLoop(stdout: anytype, text: *[4][80]u8) !void {
     // hjkl to navigate
     switch (input[0]) {
         'j' => {
-            if (cursorY < 10) cursorY += 1;
+            if (cursorY < buffer.lineCount) cursorY += 1;
         },
         'k' => {
             if (cursorY > 0) cursorY -= 1;
