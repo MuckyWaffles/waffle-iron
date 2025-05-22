@@ -2,9 +2,12 @@ const std = @import("std");
 const posix = std.posix;
 
 pub fn moveCursor(writer: anytype, row: usize, col: usize) void {
-    _ = writer.print("\x1B[{};{}H", .{ row + 1, col + 1 }) catch |err| {
-        std.debug.print("Error moving cursor: {}", .{err});
-    };
+    _ = writer;
+    const text: []u8 = undefined;
+    try std.fmt.bufPrint(text, "\x1B[{};{}H", .{ row + 1, col + 1 });
+    //_ = writer.print("\x1B[{};{}H", .{ row + 1, col + 1 }) catch |err| {
+    //    std.debug.print("Error moving cursor: {}", .{err});
+    //};
 }
 
 const Size = struct {
@@ -27,7 +30,7 @@ const Terminal = struct {
 
     /// Create terminal
     pub fn init(self: *Terminal, stdout: anytype) !void {
-        self.size = .{ .width = 0, .height = 0 };
+        self.size = try self.getSize();
         self.tty = try posix.open("/dev/tty", .{ .ACCMODE = .RDWR }, 0);
         self.original = try std.posix.tcgetattr(self.tty);
         self.raw = try self.uncook(stdout);
@@ -104,16 +107,19 @@ const Terminal = struct {
 
 pub fn handleSigWinch(_: c_int) callconv(.C) void {
     terminal.size = terminal.getSize() catch return;
-    //render() catch return;
+    render() catch return;
 }
 
-pub fn render(stdout: anytype, tty: std.posix.fd_t, text: *[4][80]u8) !void {
-    _ = try posix.write(tty, "\x1B[2J");
+pub fn render(stdout: anytype, term: Terminal, textBuffer: TextBuffer) !void {
+    _ = try posix.write(term.tty, "\x1B[2J");
     //_ = text;
-    for (text, 0..) |line, i| {
+    for (textBuffer.text, 0..) |line, i| {
         moveCursor(stdout, i, 0);
-        _ = try posix.write(tty, &line);
+        _ = try posix.write(term.tty, &line);
     }
+
+    moveCursor(stdout, term.size.height, 0);
+    _ = try posix.write(term.tty, textBuffer.name.*);
 }
 
 var terminal: Terminal = undefined;
@@ -130,7 +136,9 @@ pub fn main() !void {
         std.debug.print("Waffle Iron: requires an argument\n", .{});
         return;
     }
-    const fileName = args[1];
+    const fileName = try allocator.alloc(u8, args[1].len);
+    defer allocator.free(fileName);
+    @memcpy(fileName, args[1]);
 
     moveCursor(stdout, 0, 0);
     var found = true;
@@ -155,11 +163,12 @@ pub fn main() !void {
 
     //while (try read_stream.readUntilDelimiterOrEofAlloc
 
-    var text: [4][80]u8 = undefined;
+    buffer.name = &fileName;
+
     //try read_stream.readUntilDelimiter(&text, '\n');
-    while (try read_stream.readUntilDelimiterOrEof(&text[buffer.lineCount], '\n')) |line| {
+    while (try read_stream.readUntilDelimiterOrEof(&buffer.text[buffer.lineCount], '\n')) |line| {
         // Making sure the file doesn't read too much
-        if (buffer.lineCount + 1 >= text.len) {
+        if (buffer.lineCount + 1 >= buffer.text.len) {
             break;
         }
 
@@ -184,11 +193,13 @@ pub fn main() !void {
     }, null);
 
     // Main loop
-    while (!closeRequested) try mainLoop(stdout, &text);
+    while (!closeRequested) try mainLoop(stdout);
 }
 
 const TextBuffer = struct {
+    text: [4][80]u8 = undefined,
     lineCount: usize = 0,
+    name: *const []u8 = undefined,
 };
 var buffer = TextBuffer{};
 
@@ -197,8 +208,8 @@ var cursorY: u16 = 0;
 
 var closeRequested: bool = false;
 
-fn mainLoop(stdout: anytype, text: *[4][80]u8) !void {
-    try render(stdout, terminal.tty, text);
+fn mainLoop(stdout: anytype) !void {
+    try render(stdout, terminal, buffer);
     moveCursor(stdout, cursorY, cursorX);
 
     // TODO: support kitty keyboard protocol, perhaps
