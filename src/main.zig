@@ -176,7 +176,7 @@ pub fn main() !void {
 
     std.posix.sigaction(std.posix.SIG.WINCH, &std.posix.Sigaction{
         .handler = .{ .handler = handleSigWinch },
-        .mask = std.posix.empty_sigset,
+        .mask = posix.sigemptyset(),
         .flags = 0,
     }, null);
 
