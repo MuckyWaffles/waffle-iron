@@ -35,6 +35,47 @@ pub fn render(stdout: anytype, textBuffer: TextBuffer) !void {
 
 var terminal: term.Terminal = undefined;
 
+const TextBuffer = struct {
+    text: std.ArrayList([80]u8) = undefined,
+    file: std.fs.File = undefined,
+
+    name: *const []u8 = undefined,
+
+    // This function is here because I really hate typing
+    // buffer.text.items.len... Does Zig have a version of
+    // C's inline keyword? I should look into that
+    fn len(self: *TextBuffer) usize {
+        return self.text.items.len;
+    }
+};
+var buffer = TextBuffer{};
+
+fn writeToFile() !void {
+    try buffer.file.seekTo(0);
+    var fileWriter = buffer.file.writer();
+
+    for (buffer.text.items) |line| {
+        const trimmed = std.mem.trim(u8, &line, "\x00");
+        try fileWriter.writeAll(trimmed);
+    }
+
+    try buffer.file.setEndPos(try buffer.file.getPos());
+}
+
+fn readFile() !void {
+    var fileReader = std.io.bufferedReader(buffer.file.reader());
+    var readStream = fileReader.reader();
+
+    while (true) {
+        _ = try buffer.text.addOne();
+        buffer.text.items[buffer.len() - 1] = std.mem.zeroes([80]u8);
+        if (try readStream.readUntilDelimiterOrEof(&buffer.text.items[buffer.len() - 1], '\n') == null) {
+            _ = buffer.text.pop();
+            break;
+        }
+    }
+}
+
 pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
 
@@ -68,31 +109,19 @@ pub fn main() !void {
         const file = try std.fs.cwd().createFile(fileName, .{});
         file.close();
     }
-    //const text: []u8 = try std.fs.cwd().readFileAlloc(allocator, fileName, 1024);
-    var file = try std.fs.cwd().openFile(fileName, .{});
-    var file_reader = std.io.bufferedReader(file.reader());
-    var read_stream = file_reader.reader();
-
-    //while (try read_stream.readUntilDelimiterOrEofAlloc
+    buffer.file = try std.fs.cwd().openFile(fileName, .{
+        .mode = .read_write,
+    });
 
     buffer.name = &fileName;
     buffer.text = std.ArrayList([80]u8).init(allocator);
 
-    //try read_stream.readUntilDelimiter(&text, '\n');
-    _ = try buffer.text.addOne();
-    while (try read_stream.readUntilDelimiterOrEof(&buffer.text.items[buffer.lineCount], '\n')) |line| {
-        buffer.lineCount += 1;
-        _ = line;
-        _ = try buffer.text.addOne();
-    }
-
-    //var file = std.fs.cwd().openFile("foo.txt", .{});
-    //defer std.fs.cwd().close();
-    //std.mem.copyForwards(u8, text, "hello");
+    try readFile();
 
     try terminal.init(stdout);
 
     defer terminal.deinit(stdout);
+    errdefer terminal.deinit(stdout);
 
     // TODO: Get this working because it's kind of important
 
@@ -112,14 +141,6 @@ const Mode = enum {
 };
 
 var mode: Mode = .normal;
-
-const TextBuffer = struct {
-    text: std.ArrayList([80]u8) = undefined,
-
-    lineCount: usize = 0,
-    name: *const []u8 = undefined,
-};
-var buffer = TextBuffer{};
 
 var cursorX: u16 = 0;
 var cursorY: u16 = 0;
@@ -152,7 +173,7 @@ fn mainLoop(stdout: anytype) !void {
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[A")) {
             if (cursorY > 0) cursorY -= 1;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[B")) {
-            if (cursorY < buffer.lineCount) cursorY += 1;
+            if (cursorY < buffer.len()) cursorY += 1;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[C")) {
             if (cursorX < 20) cursorX += 1;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[D")) {
@@ -170,7 +191,7 @@ fn mainLoop(stdout: anytype) !void {
                 mode = .insert;
             },
             'j' => {
-                if (cursorY < buffer.lineCount) cursorY += 1;
+                if (cursorY < buffer.len()) cursorY += 1;
             },
             'k' => {
                 if (cursorY > 0) cursorY -= 1;
@@ -180,6 +201,9 @@ fn mainLoop(stdout: anytype) !void {
             },
             'l' => {
                 if (cursorX < 20) cursorX += 1;
+            },
+            'w' => {
+                try writeToFile();
             },
             'q' => {
                 closeRequested = true;
