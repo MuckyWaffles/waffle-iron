@@ -125,7 +125,7 @@ pub fn main() !void {
 
     // TODO: Get this working because it's kind of important
 
-    std.posix.sigaction(std.posix.SIG.WINCH, &std.posix.Sigaction{
+    posix.sigaction(posix.SIG.WINCH, &posix.Sigaction{
         .handler = .{ .handler = handleSigWinch },
         .mask = posix.sigemptyset(),
         .flags = 0,
@@ -207,6 +207,12 @@ fn mainLoop(stdout: anytype) !void {
             },
             'q' => {
                 closeRequested = true;
+            },
+            'd' => {
+                // Delete a single character
+                const copy = buffer.text.items[cursorY];
+                const line = &buffer.text.items[cursorY];
+                std.mem.copyBackwards(u8, line[cursorX..80], copy[cursorX + 1 .. 80]);
             },
             else => {},
         }
