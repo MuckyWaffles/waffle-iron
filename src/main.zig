@@ -120,6 +120,12 @@ pub fn main() !void {
 
     try terminal.init(stdout);
 
+    defer {
+        for (buffer.text.items, 0..) |line, i| {
+            moveCursor(stdout, i, 0);
+            _ = stdout.write(&line) catch unreachable;
+        }
+    }
     defer terminal.deinit(stdout);
     errdefer terminal.deinit(stdout);
 
@@ -178,6 +184,8 @@ fn mainLoop(stdout: anytype) !void {
             if (cursorX < 20) cursorX += 1;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[D")) {
             if (cursorX > 0) cursorX -= 1;
+        } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[3~")) {
+            deleteCharacter(cursorX, cursorY);
         } else {
             //try stdout.writeAll("input: unknown escape sequence\r\n");
         }
@@ -209,17 +217,39 @@ fn mainLoop(stdout: anytype) !void {
                 closeRequested = true;
             },
             'd' => {
-                // Delete a single character
-                const copy = buffer.text.items[cursorY];
-                const line = &buffer.text.items[cursorY];
-                std.mem.copyBackwards(u8, line[cursorX..80], copy[cursorX + 1 .. 80]);
+                deleteCharacter(cursorX, cursorY);
             },
             else => {},
         }
+    } else if (mode == .insert) {
+        // Check for backspace
+        if (input[0] == 0x7f) {
+            deleteCharacter(cursorX - 1, cursorY);
+            cursorX -= 1;
+            return;
+        }
+        // Insert user input
+        insertCharacter(cursorX, cursorY, input[0]);
+        cursorX += 1;
     }
     if (input[0] == '\n' or input[0] == '\r') {
         // hello?
     } else {
         // TODO: handle control key
     }
+}
+
+// Insert a single character
+fn insertCharacter(x: u16, y: u16, char: u8) void {
+    const copy = buffer.text.items[y];
+    const line = &buffer.text.items[y];
+    std.mem.copyForwards(u8, line[x + 1 .. 80], copy[x..79]);
+    line[cursorX] = char;
+}
+
+// Delete a single character
+fn deleteCharacter(x: u16, y: u16) void {
+    const copy = buffer.text.items[y];
+    const line = &buffer.text.items[y];
+    std.mem.copyBackwards(u8, line[x..80], copy[x + 1 .. 80]);
 }
