@@ -120,12 +120,6 @@ pub fn main() !void {
 
     try terminal.init(stdout);
 
-    defer {
-        for (buffer.text.items, 0..) |line, i| {
-            moveCursor(stdout, i, 0);
-            _ = stdout.write(&line) catch unreachable;
-        }
-    }
     defer terminal.deinit(stdout);
     errdefer terminal.deinit(stdout);
 
@@ -226,6 +220,22 @@ fn mainLoop(stdout: anytype) !void {
         if (input[0] == 0x7f) {
             deleteCharacter(cursorX - 1, cursorY);
             cursorX -= 1;
+            return;
+        } else if (input[0] == '\n' or input[0] == '\r') {
+            // Insert New line full of zeroes
+            try buffer.text.insert(cursorY + 1, std.mem.zeroes([80]u8));
+
+            // Copy end of old line to new line
+            const trailingLine = buffer.text.items[cursorY][cursorX..80];
+            std.mem.copyForwards(u8, buffer.text.items[cursorY + 1][0..80], trailingLine);
+
+            // Clear trailing end of old line and add newline character
+            @memset(buffer.text.items[cursorY][cursorX..80], 0x00);
+            insertCharacter(cursorX, cursorY, '\n');
+
+            // Move cursor to the next line
+            cursorX = 0;
+            cursorY += 1;
             return;
         }
         // Insert user input
