@@ -216,6 +216,14 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
             'd' => {
                 deleteCharacter(cursorX, cursorY);
             },
+            'o' => {
+                var line = std.ArrayList(u8).init(allocator);
+                try line.append('\n');
+                try buffer.text.insert(cursorY + 1, line);
+                cursorY += 1;
+                cursorX = 0;
+                mode = .insert;
+            },
             else => {},
         }
     } else if (mode == .insert) {
