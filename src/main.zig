@@ -18,7 +18,7 @@ pub fn render(stdout: anytype, textBuffer: TextBuffer) !void {
     //_ = text;
     for (textBuffer.text.items, 0..) |line, i| {
         moveCursor(stdout, i, 0);
-        _ = try posix.write(terminal.tty, &line);
+        _ = try posix.write(terminal.tty, line.items);
     }
 
     moveCursor(stdout, terminal.size.height, 0);
@@ -36,7 +36,7 @@ pub fn render(stdout: anytype, textBuffer: TextBuffer) !void {
 var terminal: term.Terminal = undefined;
 
 const TextBuffer = struct {
-    text: std.ArrayList([80]u8) = undefined,
+    text: std.ArrayList(std.ArrayList(u8)) = undefined,
     file: std.fs.File = undefined,
 
     name: *const []u8 = undefined,
@@ -55,24 +55,27 @@ fn writeToFile() !void {
     var fileWriter = buffer.file.writer();
 
     for (buffer.text.items) |line| {
-        const trimmed = std.mem.trim(u8, &line, "\x00");
+        const trimmed = std.mem.trim(u8, line.items, "\x00");
         try fileWriter.writeAll(trimmed);
     }
 
     try buffer.file.setEndPos(try buffer.file.getPos());
 }
 
-fn readFile() !void {
+fn readFile(allocator: anytype) !void {
     var fileReader = std.io.bufferedReader(buffer.file.reader());
     var readStream = fileReader.reader();
 
     while (true) {
-        _ = try buffer.text.addOne();
-        buffer.text.items[buffer.len() - 1] = std.mem.zeroes([80]u8);
-        if (try readStream.readUntilDelimiterOrEof(&buffer.text.items[buffer.len() - 1], '\n') == null) {
-            _ = buffer.text.pop();
-            break;
+        var buff: [256]u8 = [_]u8{0x00} ** 256;
+        if (try readStream.readUntilDelimiterOrEof(&buff, '\n') == null) {
+            return;
         }
+
+        const trimmed = std.mem.trim(u8, &buff, "\x00");
+        var line = std.ArrayList(u8).init(allocator);
+        try line.appendSlice(trimmed);
+        _ = try buffer.text.append(line);
     }
 }
 
@@ -114,9 +117,9 @@ pub fn main() !void {
     });
 
     buffer.name = &fileName;
-    buffer.text = std.ArrayList([80]u8).init(allocator);
+    buffer.text = std.ArrayList(std.ArrayList(u8)).init(allocator);
 
-    try readFile();
+    try readFile(allocator);
 
     try terminal.init(stdout);
 
@@ -132,7 +135,7 @@ pub fn main() !void {
     }, null);
 
     // Main loop
-    while (!closeRequested) try mainLoop(stdout);
+    while (!closeRequested) try mainLoop(stdout, allocator);
 }
 
 const Mode = enum {
@@ -147,7 +150,7 @@ var cursorY: u16 = 0;
 
 var closeRequested: bool = false;
 
-fn mainLoop(stdout: anytype) !void {
+fn mainLoop(stdout: anytype, allocator: anytype) !void {
     try render(stdout, buffer);
     moveCursor(stdout, cursorY, cursorX);
 
@@ -173,9 +176,9 @@ fn mainLoop(stdout: anytype) !void {
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[A")) {
             if (cursorY > 0) cursorY -= 1;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[B")) {
-            if (cursorY < buffer.len()) cursorY += 1;
+            if (cursorY < buffer.len() - 1) cursorY += 1;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[C")) {
-            if (cursorX < 20) cursorX += 1;
+            if (cursorX < buffer.text.items[cursorY].items.len - 1) cursorX += 1;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[D")) {
             if (cursorX > 0) cursorX -= 1;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[3~")) {
@@ -193,7 +196,7 @@ fn mainLoop(stdout: anytype) !void {
                 mode = .insert;
             },
             'j' => {
-                if (cursorY < buffer.len()) cursorY += 1;
+                if (cursorY < buffer.len() - 1) cursorY += 1;
             },
             'k' => {
                 if (cursorY > 0) cursorY -= 1;
@@ -202,7 +205,7 @@ fn mainLoop(stdout: anytype) !void {
                 if (cursorX > 0) cursorX -= 1;
             },
             'l' => {
-                if (cursorX < 20) cursorX += 1;
+                if (cursorX < buffer.text.items[cursorY].items.len - 1) cursorX += 1;
             },
             'w' => {
                 try writeToFile();
@@ -222,15 +225,12 @@ fn mainLoop(stdout: anytype) !void {
             cursorX -= 1;
             return;
         } else if (input[0] == '\n' or input[0] == '\r') {
-            // Insert New line full of zeroes
-            try buffer.text.insert(cursorY + 1, std.mem.zeroes([80]u8));
-
-            // Copy end of old line to new line
-            const trailingLine = buffer.text.items[cursorY][cursorX..80];
-            std.mem.copyForwards(u8, buffer.text.items[cursorY + 1][0..80], trailingLine);
-
             // Clear trailing end of old line and add newline character
-            @memset(buffer.text.items[cursorY][cursorX..80], 0x00);
+            var line = std.ArrayList(u8).init(allocator);
+            try line.appendSlice(buffer.text.items[cursorY].items[cursorX..]);
+            buffer.text.items[cursorY].shrinkRetainingCapacity(cursorX);
+            try buffer.text.insert(cursorY + 1, line);
+
             insertCharacter(cursorX, cursorY, '\n');
 
             // Move cursor to the next line
@@ -249,17 +249,19 @@ fn mainLoop(stdout: anytype) !void {
     }
 }
 
+// ArrayLists make these functions laughably easy...
+// I WANNA WRITE CODE THIS TOTALLY SUCKS!
+
 // Insert a single character
 fn insertCharacter(x: u16, y: u16, char: u8) void {
-    const copy = buffer.text.items[y];
     const line = &buffer.text.items[y];
-    std.mem.copyForwards(u8, line[x + 1 .. 80], copy[x..79]);
-    line[cursorX] = char;
+    line.insert(x, char) catch |err| {
+        std.debug.print("Error: {}", .{err});
+    };
 }
 
 // Delete a single character
 fn deleteCharacter(x: u16, y: u16) void {
-    const copy = buffer.text.items[y];
     const line = &buffer.text.items[y];
-    std.mem.copyBackwards(u8, line[x..80], copy[x + 1 .. 80]);
+    _ = line.orderedRemove(x);
 }
