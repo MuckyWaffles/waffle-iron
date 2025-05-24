@@ -221,8 +221,24 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
     } else if (mode == .insert) {
         // Check for backspace
         if (input[0] == 0x7f) {
-            deleteCharacter(cursorX - 1, cursorY);
-            cursorX -= 1;
+            if (cursorX > 0) {
+                // Normal delete
+                deleteCharacter(cursorX - 1, cursorY);
+                cursorX -= 1;
+            } else {
+                // Deleting line if user backspaces at index 0
+                const line = buffer.text.orderedRemove(cursorY);
+
+                // Moving cursor to end of previous line
+                cursorY -= 1;
+                cursorX = @intCast(buffer.text.items[cursorY].items.len - 1);
+
+                // Deleting newline at the top
+                deleteCharacter(cursorX, cursorY);
+
+                // Adding old line to the end
+                try buffer.text.items[cursorY].appendSlice(line.items);
+            }
             return;
         } else if (input[0] == '\n' or input[0] == '\r') {
             // Clear trailing end of old line and add newline character
