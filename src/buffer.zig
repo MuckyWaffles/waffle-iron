@@ -51,12 +51,19 @@ pub const Buffer = struct {
         while (true) {
             var buff: [256]u8 = [_]u8{0x00} ** 256;
             if (try readStream.readUntilDelimiterOrEof(&buff, '\n') == null) {
-                return;
+                break;
             }
 
             const trimmed = std.mem.trim(u8, &buff, "\x00");
             var line = std.ArrayList(u8).init(allocator);
             try line.appendSlice(trimmed);
+            _ = try self.text.append(line);
+        }
+
+        // Adding an extra line if the file is empty
+        if (self.text.items.len < 1) {
+            var line = std.ArrayList(u8).init(allocator);
+            try line.append('\n');
             _ = try self.text.append(line);
         }
     }
