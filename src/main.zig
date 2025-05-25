@@ -56,10 +56,8 @@ pub fn main() !void {
     try buffer.readFile(allocator);
 
     // Initialize our terminal
-    try terminal.init(stdout);
-
-    defer terminal.deinit(stdout);
-    errdefer terminal.deinit(stdout);
+    try terminal.init();
+    defer terminal.deinit();
 
     // Handle window resizing
     posix.sigaction(posix.SIG.WINCH, &posix.Sigaction{
@@ -110,9 +108,9 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
             'o' => {
                 var line = std.ArrayList(u8).init(allocator);
                 try line.append('\n');
-                try buffer.text.insert(cursorY + 1, line);
                 cursorY += 1;
                 cursorX = 0;
+                try buffer.text.insert(cursorY, line);
                 mode = .insert;
             },
             'O' => {
@@ -228,4 +226,13 @@ fn insertCharacter(x: u16, y: u16, char: u8) void {
 fn deleteCharacter(x: u16, y: u16) void {
     const line = &buffer.text.items[y];
     _ = line.orderedRemove(x);
+}
+
+// Make sure the code cleans up on panic.
+// Working with an uncooked terminal is really annoying...
+pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, _: ?usize) noreturn {
+    terminal.deinit(); // Call your custom deinit
+    std.debug.print("Panic: {s}\n", .{msg});
+    std.posix.exit(1);
+    _ = error_return_trace;
 }

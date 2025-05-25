@@ -5,6 +5,7 @@ const Size = struct {
     width: usize,
     height: usize,
 };
+const stdout = std.io.getStdOut().writer();
 
 pub const Terminal = struct {
     /// Terminal window size
@@ -20,22 +21,22 @@ pub const Terminal = struct {
     tty: std.posix.fd_t,
 
     /// Create terminal
-    pub fn init(self: *Terminal, stdout: anytype) !void {
+    pub fn init(self: *Terminal) !void {
         self.size = try self.getSize();
         self.tty = try posix.open("/dev/tty", .{ .ACCMODE = .RDWR }, 0);
         self.original = try std.posix.tcgetattr(self.tty);
-        self.raw = try self.uncook(stdout);
+        self.raw = try self.uncook();
     }
 
-    pub fn deinit(self: *Terminal, stdout: anytype) void {
-        self.cook(stdout) catch |err| {
+    pub fn deinit(self: *Terminal) void {
+        self.cook() catch |err| {
             std.debug.print("{}\n", .{err});
         };
         posix.close(self.tty);
     }
 
     // Uncooking the terminal, and storing original state
-    pub fn uncook(self: *Terminal, stdout: anytype) !posix.termios {
+    pub fn uncook(self: *Terminal) !posix.termios {
         var raw = self.original;
 
         // In the words of Leon Henrik Plickat, it's better we don't
@@ -71,7 +72,7 @@ pub const Terminal = struct {
         return raw;
     }
 
-    pub fn cook(self: *Terminal, stdout: anytype) !void {
+    pub fn cook(self: *Terminal) !void {
         try posix.tcsetattr(self.tty, .FLUSH, self.original);
         try stdout.writeAll("\x1B[?1049l"); // Disable alternative buffer.
         try stdout.writeAll("\x1B[?47l"); // Restore screen.
