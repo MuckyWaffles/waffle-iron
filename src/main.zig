@@ -51,14 +51,17 @@ pub fn main() !void {
         return;
     }
 
+    // Initialize our buffer, and open given file
     buffer = try buf.Buffer.init(allocator, args[1]);
     try buffer.readFile(allocator);
 
+    // Initialize our terminal
     try terminal.init(stdout);
 
     defer terminal.deinit(stdout);
     errdefer terminal.deinit(stdout);
 
+    // Handle window resizing
     posix.sigaction(posix.SIG.WINCH, &posix.Sigaction{
         .handler = .{ .handler = handleSigWinch },
         .mask = posix.sigemptyset(),
@@ -82,44 +85,20 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
     try render(stdout, buffer);
     moveCursor(stdout, cursorY, cursorX);
 
-    // TODO: support kitty keyboard protocol, perhaps
-    var input: [1]u8 = undefined;
-    _ = try posix.read(terminal.tty, &input);
-    if (input[0] == '\x1B') {
-        // Handling escape characters
-        terminal.raw.cc[@intFromEnum(posix.system.V.TIME)] = 1;
-        terminal.raw.cc[@intFromEnum(posix.system.V.MIN)] = 0;
-        try posix.tcsetattr(terminal.tty, .NOW, terminal.raw);
-
-        var esc_buffer: [8]u8 = undefined;
-        const esc_read = try posix.read(terminal.tty, &esc_buffer);
-
-        terminal.raw.cc[@intFromEnum(posix.system.V.TIME)] = 0;
-        terminal.raw.cc[@intFromEnum(posix.system.V.MIN)] = 1;
-        try posix.tcsetattr(terminal.tty, .NOW, terminal.raw);
-
-        if (esc_read == 0) {
-            // User just pressed the escape key
-            mode = .normal;
-        } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[A")) {
-            cursorUp();
-        } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[B")) {
-            cursorDown();
-        } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[C")) {
-            cursorRight();
-        } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[D")) {
-            cursorLeft();
-        } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[3~")) {
-            deleteCharacter(cursorX, cursorY);
-        } else {
-            //try stdout.writeAll("input: unknown escape sequence\r\n");
-        }
-        return;
+    const keys = try terminal.getKeyPresses();
+    switch (keys.keyAction) {
+        .escape => mode = .normal,
+        .arrowUp => cursorUp(),
+        .arrowDown => cursorDown(),
+        .arrowLeft => cursorLeft(),
+        .arrowRight => cursorRight(),
+        .delete => deleteCharacter(cursorX, cursorY),
+        else => {},
     }
 
     // hjkl to navigate
     if (mode == .normal) {
-        switch (input[0]) {
+        switch (keys.char) {
             'i' => mode = .insert,
             'j' => cursorDown(),
             'k' => cursorUp(),
@@ -136,15 +115,23 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
                 cursorX = 0;
                 mode = .insert;
             },
+            'O' => {
+                var line = std.ArrayList(u8).init(allocator);
+                try line.append('\n');
+                try buffer.text.insert(cursorY - 1, line);
+                cursorY -= 1;
+                cursorX = 0;
+                mode = .insert;
+            },
             else => {},
         }
     } else if (mode == .insert) {
         // Check for backspace
-        if (input[0] == 0x7f) {
+        if (keys.char == 0x7f) {
             if (cursorX > 0) {
                 // Normal delete
-                deleteCharacter(cursorX - 1, cursorY);
                 cursorX -= 1;
+                deleteCharacter(cursorX, cursorY);
             } else {
                 // Deleting line if user backspaces at index 0
                 const line = buffer.text.orderedRemove(cursorY);
@@ -160,7 +147,7 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
                 try buffer.text.items[cursorY].appendSlice(line.items);
             }
             return;
-        } else if (input[0] == '\n' or input[0] == '\r') {
+        } else if (keys.char == '\n' or keys.char == '\r') {
             // Clear trailing end of old line and add newline character
             var line = std.ArrayList(u8).init(allocator);
             try line.appendSlice(buffer.text.items[cursorY].items[cursorX..]);
@@ -175,13 +162,8 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
             return;
         }
         // Insert user input
-        insertCharacter(cursorX, cursorY, input[0]);
+        insertCharacter(cursorX, cursorY, keys.char);
         cursorX += 1;
-    }
-    if (input[0] == '\n' or input[0] == '\r') {
-        // hello?
-    } else {
-        // TODO: handle control key
     }
 }
 
@@ -192,7 +174,7 @@ var trueX: u16 = 0;
 // For these cursorUp and cursorDown functions, I repeat a very
 // small amount of code, and I'm not sure if it's worth reducing...
 fn cursorUp() void {
-    if (cursorY > 0) return;
+    if (cursorY <= 0) return;
     cursorY -= 1;
 
     const lineLen: u16 = @intCast(buffer.lineLen(cursorY));
@@ -203,7 +185,7 @@ fn cursorUp() void {
     cursorX = std.math.clamp(trueX, 0, lineLen);
 }
 fn cursorDown() void {
-    if (cursorY < buffer.len()) return;
+    if (cursorY >= buffer.len()) return;
     cursorY += 1;
 
     const lineLen: u16 = @intCast(buffer.lineLen(cursorY));
@@ -239,7 +221,7 @@ fn cursorRight() void {
 fn insertCharacter(x: u16, y: u16, char: u8) void {
     const line = &buffer.text.items[y];
     line.insert(x, char) catch |err| {
-        std.debug.print("Error: {}", .{err});
+     std.debug.print("Error: {}", .{err});
     };
 }
 

@@ -93,4 +93,63 @@ pub const Terminal = struct {
             .height = size.row,
         };
     }
+
+    /// Return KeyboardEvent struct that holds a special
+    /// KeyAction or a normal char
+    pub fn getKeyPresses(self: *Terminal) !KeyboardEvent {
+        var keys = KeyboardEvent{};
+
+        // TODO: Support kitty keyboard protocol
+        var input: [1]u8 = undefined;
+        _ = try posix.read(self.tty, &input);
+
+        if (input[0] == '\x1B') {
+            // Handling escape characters
+            self.raw.cc[@intFromEnum(posix.system.V.TIME)] = 1;
+            self.raw.cc[@intFromEnum(posix.system.V.MIN)] = 0;
+            try posix.tcsetattr(self.tty, .NOW, self.raw);
+
+            var escBuffer: [8]u8 = undefined;
+            const escRead = try posix.read(self.tty, &escBuffer);
+
+            self.raw.cc[@intFromEnum(posix.system.V.TIME)] = 0;
+            self.raw.cc[@intFromEnum(posix.system.V.MIN)] = 1;
+            try posix.tcsetattr(self.tty, .NOW, self.raw);
+
+            const char = escBuffer[0..escRead];
+
+            if (escRead == 0) {
+                keys.keyAction = .escape;
+            } else if (std.mem.eql(u8, char, "[A")) {
+                keys.keyAction = .arrowUp;
+            } else if (std.mem.eql(u8, char, "[B")) {
+                keys.keyAction = .arrowDown;
+            } else if (std.mem.eql(u8, char, "[C")) {
+                keys.keyAction = .arrowRight;
+            } else if (std.mem.eql(u8, char, "[D")) {
+                keys.keyAction = .arrowLeft;
+            } else if (std.mem.eql(u8, char, "[3~")) {
+                keys.keyAction = .delete;
+            }
+            return keys;
+        }
+        keys.char = input[0];
+        return keys;
+    }
+};
+
+/// Special key codes
+pub const KeyAction = enum {
+    none,
+    escape,
+    delete,
+    arrowLeft,
+    arrowRight,
+    arrowUp,
+    arrowDown,
+};
+
+pub const KeyboardEvent = struct {
+    keyAction: KeyAction = .none,
+    char: u8 = 0,
 };
