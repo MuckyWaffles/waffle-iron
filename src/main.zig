@@ -76,9 +76,6 @@ const Mode = enum {
 
 var mode: Mode = .normal;
 
-var cursorX: u16 = 0;
-var cursorY: u16 = 0;
-
 var closeRequested: bool = false;
 
 fn mainLoop(stdout: anytype, allocator: anytype) !void {
@@ -105,13 +102,13 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
             // User just pressed the escape key
             mode = .normal;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[A")) {
-            if (cursorY > 0) cursorY -= 1;
+            cursorUp();
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[B")) {
-            if (cursorY < buffer.len()) cursorY += 1;
+            cursorDown();
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[C")) {
-            if (cursorX < buffer.lineLen(cursorY)) cursorX += 1;
+            cursorRight();
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[D")) {
-            if (cursorX > 0) cursorX -= 1;
+            cursorLeft();
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[3~")) {
             deleteCharacter(cursorX, cursorY);
         } else {
@@ -123,15 +120,9 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
     // hjkl to navigate
     if (mode == .normal) {
         switch (input[0]) {
-            'i' => {
-                mode = .insert;
-            },
-            'j' => {
-                if (cursorY < buffer.len()) cursorY += 1;
-            },
-            'k' => {
-                if (cursorY > 0) cursorY -= 1;
-            },
+            'i' => mode = .insert,
+            'j' => cursorDown(),
+            'k' => cursorUp(),
             'h' => cursorLeft(),
             'l' => cursorRight(),
             'w' => try buffer.writeToFile(),
@@ -194,6 +185,34 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
     }
 }
 
+var cursorX: u16 = 0;
+var cursorY: u16 = 0;
+var trueX: u16 = 0;
+
+// For these cursorUp and cursorDown functions, I repeat a very
+// small amount of code, and I'm not sure if it's worth reducing...
+fn cursorUp() void {
+    if (cursorY > 0) return;
+    cursorY -= 1;
+
+    const lineLen: u16 = @intCast(buffer.lineLen(cursorY));
+    if (cursorX > lineLen) {
+        if (lineLen > trueX) trueX = cursorX;
+        cursorX = lineLen;
+    }
+    cursorX = std.math.clamp(trueX, 0, lineLen);
+}
+fn cursorDown() void {
+    if (cursorY < buffer.len()) return;
+    cursorY += 1;
+
+    const lineLen: u16 = @intCast(buffer.lineLen(cursorY));
+    if (cursorX > lineLen) {
+        if (lineLen > trueX) trueX = cursorX;
+        cursorX = lineLen;
+    }
+    cursorX = std.math.clamp(trueX, 0, lineLen);
+}
 fn cursorLeft() void {
     if (cursorX > 0) {
         cursorX -= 1;
@@ -201,6 +220,7 @@ fn cursorLeft() void {
         cursorY -= 1;
         cursorX = @intCast(buffer.lineLen(cursorY));
     }
+    trueX = cursorX;
 }
 fn cursorRight() void {
     if (cursorX < buffer.lineLen(cursorY)) {
@@ -209,6 +229,7 @@ fn cursorRight() void {
         cursorY += 1;
         cursorX = 0;
     }
+    trueX = cursorX;
 }
 
 // ArrayLists make these functions laughably easy...
