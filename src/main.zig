@@ -1,6 +1,7 @@
 const std = @import("std");
 const posix = std.posix;
 const term = @import("terminal.zig");
+const buf = @import("buffer.zig");
 
 pub fn moveCursor(writer: anytype, row: usize, col: usize) void {
     _ = writer.print("\x1B[{};{}H", .{ row + 1, col + 1 }) catch |err| {
@@ -13,7 +14,7 @@ pub fn handleSigWinch(_: c_int) callconv(.C) void {
     //try render(stdout, terminal, buffer);
 }
 
-pub fn render(stdout: anytype, textBuffer: TextBuffer) !void {
+pub fn render(stdout: anytype, textBuffer: buf.Buffer) !void {
     _ = try posix.write(terminal.tty, "\x1B[2J");
     //_ = text;
     for (textBuffer.text.items, 0..) |line, i| {
@@ -35,20 +36,7 @@ pub fn render(stdout: anytype, textBuffer: TextBuffer) !void {
 
 var terminal: term.Terminal = undefined;
 
-const TextBuffer = struct {
-    text: std.ArrayList(std.ArrayList(u8)) = undefined,
-    file: std.fs.File = undefined,
-
-    name: *const []u8 = undefined,
-
-    // This function is here because I really hate typing
-    // buffer.text.items.len... Does Zig have a version of
-    // C's inline keyword? I should look into that
-    fn len(self: *TextBuffer) usize {
-        return self.text.items.len;
-    }
-};
-var buffer = TextBuffer{};
+var buffer = buf.Buffer{};
 
 fn writeToFile() !void {
     try buffer.file.seekTo(0);
@@ -178,7 +166,7 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[B")) {
             if (cursorY < buffer.len() - 1) cursorY += 1;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[C")) {
-            if (cursorX < buffer.text.items[cursorY].items.len - 1) cursorX += 1;
+            if (cursorX < buffer.lineLen(cursorY) - 1) cursorX += 1;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[D")) {
             if (cursorX > 0) cursorX -= 1;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[3~")) {
@@ -205,7 +193,7 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
                 if (cursorX > 0) cursorX -= 1;
             },
             'l' => {
-                if (cursorX < buffer.text.items[cursorY].items.len - 1) cursorX += 1;
+                if (cursorX < buffer.lineLen(cursorY) - 1) cursorX += 1;
             },
             'w' => {
                 try writeToFile();
