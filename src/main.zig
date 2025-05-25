@@ -132,12 +132,8 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
             'k' => {
                 if (cursorY > 0) cursorY -= 1;
             },
-            'h' => {
-                if (cursorX > 0) cursorX -= 1;
-            },
-            'l' => {
-                if (cursorX < buffer.lineLen(cursorY)) cursorX += 1;
-            },
+            'h' => cursorLeft(),
+            'l' => cursorRight(),
             'w' => try buffer.writeToFile(),
             'q' => closeRequested = true,
             'd' => deleteCharacter(cursorX, cursorY),
@@ -195,6 +191,23 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
         // hello?
     } else {
         // TODO: handle control key
+    }
+}
+
+fn cursorLeft() void {
+    if (cursorX > 0) {
+        cursorX -= 1;
+    } else if (cursorY > 0) {
+        cursorY -= 1;
+        cursorX = @intCast(buffer.lineLen(cursorY));
+    }
+}
+fn cursorRight() void {
+    if (cursorX < buffer.lineLen(cursorY)) {
+        cursorX += 1;
+    } else if (cursorY < buffer.len()) {
+        cursorY += 1;
+        cursorX = 0;
     }
 }
 
