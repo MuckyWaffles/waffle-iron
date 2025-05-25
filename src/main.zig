@@ -118,8 +118,7 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
             'O' => {
                 var line = std.ArrayList(u8).init(allocator);
                 try line.append('\n');
-                try buffer.text.insert(cursorY - 1, line);
-                cursorY -= 1;
+                try buffer.text.insert(cursorY, line);
                 cursorX = 0;
                 mode = .insert;
             },
@@ -221,7 +220,7 @@ fn cursorRight() void {
 fn insertCharacter(x: u16, y: u16, char: u8) void {
     const line = &buffer.text.items[y];
     line.insert(x, char) catch |err| {
-     std.debug.print("Error: {}", .{err});
+        std.debug.print("Error: {}", .{err});
     };
 }
 
