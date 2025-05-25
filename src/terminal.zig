@@ -79,8 +79,7 @@ pub const Terminal = struct {
     }
 
     pub fn getSize(self: *Terminal) !Size {
-        // TODO: documentation for std.mem.zeroes claims it's "stinky"? (look into it)
-        var size = std.mem.zeroes(posix.winsize);
+        var size = posix.winsize{ .row = 0, .col = 0, .xpixel = 0, .ypixel = 0 };
         const err = std.os.linux.ioctl(
             self.tty,
             posix.T.IOCGWINSZ,

@@ -23,9 +23,9 @@ pub fn render(stdout: anytype, textBuffer: buf.Buffer) !void {
     }
 
     moveCursor(stdout, terminal.size.height, 0);
-    _ = try posix.write(terminal.tty, textBuffer.name.*);
+    _ = try posix.write(terminal.tty, textBuffer.name);
 
-    moveCursor(stdout, terminal.size.height, textBuffer.name.*.len + 2);
+    moveCursor(stdout, terminal.size.height, textBuffer.name.len + 2);
 
     const modeString = switch (mode) {
         .normal => "Mode: Normal",
@@ -37,35 +37,6 @@ pub fn render(stdout: anytype, textBuffer: buf.Buffer) !void {
 var terminal: term.Terminal = undefined;
 
 var buffer = buf.Buffer{};
-
-fn writeToFile() !void {
-    try buffer.file.seekTo(0);
-    var fileWriter = buffer.file.writer();
-
-    for (buffer.text.items) |line| {
-        const trimmed = std.mem.trim(u8, line.items, "\x00");
-        try fileWriter.writeAll(trimmed);
-    }
-
-    try buffer.file.setEndPos(try buffer.file.getPos());
-}
-
-fn readFile(allocator: anytype) !void {
-    var fileReader = std.io.bufferedReader(buffer.file.reader());
-    var readStream = fileReader.reader();
-
-    while (true) {
-        var buff: [256]u8 = [_]u8{0x00} ** 256;
-        if (try readStream.readUntilDelimiterOrEof(&buff, '\n') == null) {
-            return;
-        }
-
-        const trimmed = std.mem.trim(u8, &buff, "\x00");
-        var line = std.ArrayList(u8).init(allocator);
-        try line.appendSlice(trimmed);
-        _ = try buffer.text.append(line);
-    }
-}
 
 pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
@@ -80,41 +51,13 @@ pub fn main() !void {
         return;
     }
 
-    const fileName = try allocator.alloc(u8, args[1].len);
-    defer allocator.free(fileName);
-    @memcpy(fileName, args[1]);
-
-    moveCursor(stdout, 0, 0);
-    var found = true;
-    std.fs.cwd().access(fileName, .{}) catch |err| switch (err) {
-        error.FileNotFound => {
-            std.debug.print("File not found\n", .{});
-            found = false;
-        },
-        else => {
-            std.debug.print("Error: {}\n", .{err});
-            return err;
-        },
-    };
-    if (!found) {
-        const file = try std.fs.cwd().createFile(fileName, .{});
-        file.close();
-    }
-    buffer.file = try std.fs.cwd().openFile(fileName, .{
-        .mode = .read_write,
-    });
-
-    buffer.name = &fileName;
-    buffer.text = std.ArrayList(std.ArrayList(u8)).init(allocator);
-
-    try readFile(allocator);
+    buffer = try buf.Buffer.init(allocator, args[1]);
+    try buffer.readFile(allocator);
 
     try terminal.init(stdout);
 
     defer terminal.deinit(stdout);
     errdefer terminal.deinit(stdout);
-
-    // TODO: Get this working because it's kind of important
 
     posix.sigaction(posix.SIG.WINCH, &posix.Sigaction{
         .handler = .{ .handler = handleSigWinch },
@@ -164,9 +107,9 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[A")) {
             if (cursorY > 0) cursorY -= 1;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[B")) {
-            if (cursorY < buffer.len() - 1) cursorY += 1;
+            if (cursorY < buffer.len()) cursorY += 1;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[C")) {
-            if (cursorX < buffer.lineLen(cursorY) - 1) cursorX += 1;
+            if (cursorX < buffer.lineLen(cursorY)) cursorX += 1;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[D")) {
             if (cursorX > 0) cursorX -= 1;
         } else if (std.mem.eql(u8, esc_buffer[0..esc_read], "[3~")) {
@@ -184,7 +127,7 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
                 mode = .insert;
             },
             'j' => {
-                if (cursorY < buffer.len() - 1) cursorY += 1;
+                if (cursorY < buffer.len()) cursorY += 1;
             },
             'k' => {
                 if (cursorY > 0) cursorY -= 1;
@@ -193,17 +136,11 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
                 if (cursorX > 0) cursorX -= 1;
             },
             'l' => {
-                if (cursorX < buffer.lineLen(cursorY) - 1) cursorX += 1;
+                if (cursorX < buffer.lineLen(cursorY)) cursorX += 1;
             },
-            'w' => {
-                try writeToFile();
-            },
-            'q' => {
-                closeRequested = true;
-            },
-            'd' => {
-                deleteCharacter(cursorX, cursorY);
-            },
+            'w' => try buffer.writeToFile(),
+            'q' => closeRequested = true,
+            'd' => deleteCharacter(cursorX, cursorY),
             'o' => {
                 var line = std.ArrayList(u8).init(allocator);
                 try line.append('\n');
