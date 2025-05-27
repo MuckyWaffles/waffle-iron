@@ -86,8 +86,8 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
     const keys = try terminal.getKeyPresses();
     switch (keys.keyAction) {
         .escape => mode = .normal,
-        .arrowUp => cursorUp(),
-        .arrowDown => cursorDown(),
+        .arrowUp => moveCursorY(-1),
+        .arrowDown => moveCursorY(1),
         .arrowLeft => cursorLeft(),
         .arrowRight => cursorRight(),
         .delete => deleteCharacter(cursorX, cursorY),
@@ -98,8 +98,8 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
     if (mode == .normal) {
         switch (keys.char) {
             'i' => mode = .insert,
-            'j' => cursorDown(),
-            'k' => cursorUp(),
+            'j' => moveCursorY(1),
+            'k' => moveCursorY(-1),
             'h' => cursorLeft(),
             'l' => cursorRight(),
             's' => try buffer.writeToFile(),
@@ -171,20 +171,12 @@ var trueX: usize = 0;
 
 // For these cursorUp and cursorDown functions, I repeat a very
 // small amount of code, and I'm not sure if it's worth reducing...
-fn cursorUp() void {
-    if (cursorY <= 0) return;
-    cursorY -= 1;
-
-    const lineLen: usize = buffer.lineLen(cursorY);
-    if (cursorX > lineLen) {
-        if (lineLen > trueX) trueX = cursorX;
-        cursorX = lineLen;
-    }
-    cursorX = std.math.clamp(trueX, 0, lineLen);
-}
-fn cursorDown() void {
-    if (cursorY >= buffer.len()) return;
-    cursorY += 1;
+fn moveCursorY(move: i16) void {
+    cursorY = @intCast(std.math.clamp(
+        @as(i16, @intCast(cursorY)) + move,
+        0,
+        @as(i16, @intCast(buffer.len())),
+    ));
 
     const lineLen: usize = buffer.lineLen(cursorY);
     if (cursorX > lineLen) {
@@ -215,7 +207,7 @@ fn cursorRight() void {
 // ArrayLists make these functions laughably easy...
 // I WANNA WRITE CODE THIS TOTALLY SUCKS!
 
-// Insert a single character
+/// Insert a single character
 fn insertCharacter(x: usize, y: usize, char: u8) void {
     const line = &buffer.text.items[y];
     line.insert(x, char) catch |err| {
@@ -223,15 +215,22 @@ fn insertCharacter(x: usize, y: usize, char: u8) void {
     };
 }
 
-// Delete a single character
+/// Delete a single character
 fn deleteCharacter(x: usize, y: usize) void {
     const line = &buffer.text.items[y];
     _ = line.orderedRemove(x);
 }
 
-// Move ahead one word
+/// Move ahead one word
 fn moveCursorWord() void {
     const line = buffer.text.items[cursorY];
+    if (line.items[cursorX] == '\n') {
+        if (cursorY < buffer.len()) {
+            cursorY += 1;
+            cursorX = 0;
+        }
+        return;
+    }
     for (cursorX + 1..line.items.len) |i| {
         if (line.items[i] != ' ' and line.items[i] != '\n') continue;
         cursorX = i;
