@@ -102,7 +102,7 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
             'k' => cursorUp(),
             'h' => cursorLeft(),
             'l' => cursorRight(),
-            'w' => try buffer.writeToFile(),
+            's' => try buffer.writeToFile(),
             'q' => closeRequested = true,
             'd' => deleteCharacter(cursorX, cursorY),
             'o' => {
@@ -120,6 +120,7 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
                 cursorX = 0;
                 mode = .insert;
             },
+            'w' => moveCursorWord(),
             else => {},
         }
     } else if (mode == .insert) {
@@ -164,9 +165,9 @@ fn mainLoop(stdout: anytype, allocator: anytype) !void {
     }
 }
 
-var cursorX: u16 = 0;
-var cursorY: u16 = 0;
-var trueX: u16 = 0;
+var cursorX: usize = 0;
+var cursorY: usize = 0;
+var trueX: usize = 0;
 
 // For these cursorUp and cursorDown functions, I repeat a very
 // small amount of code, and I'm not sure if it's worth reducing...
@@ -174,7 +175,7 @@ fn cursorUp() void {
     if (cursorY <= 0) return;
     cursorY -= 1;
 
-    const lineLen: u16 = @intCast(buffer.lineLen(cursorY));
+    const lineLen: usize = buffer.lineLen(cursorY);
     if (cursorX > lineLen) {
         if (lineLen > trueX) trueX = cursorX;
         cursorX = lineLen;
@@ -185,7 +186,7 @@ fn cursorDown() void {
     if (cursorY >= buffer.len()) return;
     cursorY += 1;
 
-    const lineLen: u16 = @intCast(buffer.lineLen(cursorY));
+    const lineLen: usize = buffer.lineLen(cursorY);
     if (cursorX > lineLen) {
         if (lineLen > trueX) trueX = cursorX;
         cursorX = lineLen;
@@ -215,7 +216,7 @@ fn cursorRight() void {
 // I WANNA WRITE CODE THIS TOTALLY SUCKS!
 
 // Insert a single character
-fn insertCharacter(x: u16, y: u16, char: u8) void {
+fn insertCharacter(x: usize, y: usize, char: u8) void {
     const line = &buffer.text.items[y];
     line.insert(x, char) catch |err| {
         std.debug.print("Error: {}", .{err});
@@ -223,9 +224,19 @@ fn insertCharacter(x: u16, y: u16, char: u8) void {
 }
 
 // Delete a single character
-fn deleteCharacter(x: u16, y: u16) void {
+fn deleteCharacter(x: usize, y: usize) void {
     const line = &buffer.text.items[y];
     _ = line.orderedRemove(x);
+}
+
+// Move ahead one word
+fn moveCursorWord() void {
+    const line = buffer.text.items[cursorY];
+    for (cursorX + 1..line.items.len) |i| {
+        if (line.items[i] != ' ' and line.items[i] != '\n') continue;
+        cursorX = i;
+        break;
+    }
 }
 
 // Make sure the code cleans up on panic.
